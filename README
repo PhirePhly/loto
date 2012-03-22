@@ -1,0 +1,127 @@
+LOTO (Lock-Out Tag-Out) - Unix Filesystem Mutex
+
+Loto is a wrapper utility which uses the POSIX file lock system calls 
+to enable exclusion on computing resources based on arbitrary file system
+path names for shell scripts. The typical use for this utility is for very
+often running cron jobs which can run a variable length of time to prevent
+a sourcer's appretice-type collapse, or to ensure that only one script is
+changing any form of database or log file at once.
+
+At the minimum, loto needs to be called with the -L=/path/to/lockfile
+argument, a -- to signify the end of options for loto, and a single shell
+command and arguments to be passed to this child process.  Loto then attempts
+to gain a flock() on the lockfile, forks, and waits on the child process
+before releasing the lock and exiting.
+
+loto -L=/path/to/lockfile | -L=resource [-q] [-v] [-w] [-t=N] -- command arg
+
+-L=/path/to/lockfile:
+	Specify the pathname for the lock file on which to gain an
+	exclusive lock. The = is optional and can be replaced with a space.
+-L=resource {cpu,net}:
+	Loto also supports macros for common universal resources, which 
+	are expanded to "/var/lock/loto.resource". The default distribution
+	supports the cpu resource for processing-intensive batch jobs, and
+	the net resource for bandwidth-intensive jobs.
+	It is possible that future versions of loto may support multiple 
+	L arguments, but currently it issues a warning if it sees more than
+	one and uses the last -L listed in the arguments
+
+-q:
+	Quiet operation. Only prints to stderr or returns EXIT_FAILURE
+	on tragic failures. Failure to gain lock is not considered tragic
+
+-v:
+	Verbose operation. Gives a play-by-play as loto attempts to gain
+	a lock on the lockfile and waits for the child process to finish
+
+-w:
+	Wait for the lock. Without the -w flag, loto will immediately give
+	up if it fails to gain a lock on it. With -w, loto will go to sleep
+	for 1 second, try again, and then progessively wait longer, but 
+	random, lengths of time between attempts. There is no guarantee that
+	multiple processes waiting for a single lock will gain the lock in
+	any specific order.
+
+-t=N:
+	Don't wait much longer than N seconds for the lock. It is possible
+	loto will overshoot this bound by some trivial length of time for
+	a last lock attempt. -w is implicit and not required in addition
+	to this flag
+
+-- command argument argument:
+	A "--" is used to signify the end of all flags to loto, and all
+	further arguments to loto is a single shell command and arguments
+	to be passed to this command. If multiple commands need to be
+	excecuted during a single lock, they need to all run as a single 
+	process, so either wrap them as a seperate shell script or pass
+	them as arguments to a single shell:
+		$ loto -L cpu -- script.sh
+		$ loto -L cpu -- sh -c "command arg; command; command;"
+
+
+By using the flock() system call, loto ensures there cannot be stale locks
+from interrupted or seg-faulted processes because releasing the file 
+descriptors is handled by the operating system external to the process, 
+so there is no way for loto to exit without the lock being released for 
+the next waiting job.
+
+Loto is NOT a queuing management system. Every waiting job is a seperate
+process, and which waiting job gains the job next is purely statistical
+and furthur gives preference to younger jobs. Loto should only wait for 
+a lock if the work loads are bursty but starving older jobs waiting for 
+lock is unlikely and/or unimportant. 
+
+The term "lock-out tag-out" is originally an OSHA term for the procedures 
+used in the work environment to protect employees by preventing other users 
+of the equipment from attempting to energize or move it unexpectedly if 
+maintenance requires the worker to be in a compromising position. 
+Unfortunately, for LOTO procedures to be effective, all employees must be 
+trained to continuously observe LOTO protocols while working around hazardous 
+equipment, and failure to do so is often met with disciplinary actions. 
+The loto software tool requires users to practice this same vigilance.
+
+EEEEEEE  X     X     A     M     M  PPPP     L        EEEEEEE    SSS  
+E        X     X    A A    MM   MM  P   PP   L        E        SS   SS
+E         X   X    A   A   M M M M  P    PP  L        E        S      
+E          X X    A     A  M  M  M  P   PP   L        E        SS     
+EEEE        X     AAAAAAA  M     M  PPPP     L        EEEE       SSS  
+E          X X    A     A  M     M  P        L        E             SS
+E         X   X   A     A  M     M  P        L        E              S
+E        X     X  A     A  M     M  P        L        E        SS   SS
+EEEEEEE  X     X  A     A  M     M  P        LLLLLLL  EEEEEEE    SSS  
+
+Regularly perform a remote rsync backup, while skipping subsequent jobs
+from running until the current rsync command catches up and finishes:
+# In crontab
+*/5 * * * *	loto -L net -q -- rsync [...]
+
+Spin off bulk processing sub-jobs as part of interactive archive scripts
+without several of them thrashing or fighting the user for processor time:
+#!/bin/sh
+[...]
+loto -w -L cpu -- gzip archive1.tar &
+loto -w -L=cpu -- gzip archive2.tar &
+# Continue on with script without waiting for any of these to finish
+# If it's not even particularly important they ever get done, replace
+# -w with something like -t 21600 (give up after 6 hours)
+[...]
+
+Cause a script to atomically append several lines to a file, relative
+to other instances of it or the file's consumer, assuming all other 
+actors also wait for loto locks on this file (non-loto'd scripts break 
+this guarantee since flock()s are voluntary):
+$ loto -w -L /path/to/dbfile.txt -- append_info_to_db.sh
+
+#### Contents of "append_info_to_db.sh" ####
+#!/bin/sh
+for EACH in `cat elements_to_be_processed_together.txt`; do
+	# Do processing on each element
+	[...]
+	# Append each processed element to the list, all guaranteed to be
+	# contiguous relative to other atomically-processed batches of elements.
+	echo $RESULTOFEACH >>/path/to/dbfile.txt
+done
+
+Send all comments, bugs, and fixes to: 
+	Kenneth Finnegan <KennethFinnegan2007@GMail.com>
