@@ -56,6 +56,7 @@ loto -L=/path/to/lockfile | -L=resource [-q] [-v] [-w] [-t=N] -- command arg
 	excecuted during a single lock, they need to all run as a single 
 	process, so either wrap them as a seperate shell script or pass
 	them as arguments to a single shell:
+		$ loto -L cpu -- echo hello world
 		$ loto -L cpu -- script.sh
 		$ loto -L cpu -- sh -c "command arg; command; command;"
 
@@ -68,9 +69,10 @@ the next waiting job.
 
 Loto is NOT a queuing management system. Every waiting job is a seperate
 process, and which waiting job gains the job next is purely statistical
-and furthur gives preference to younger jobs. Loto should only wait for 
-a lock if the work loads are bursty but starving older jobs waiting for 
-lock is unlikely and/or unimportant. 
+and furthermore gives preference to younger jobs. Loto should be told to
+wait for a lock only if the work loads are bursty, strongly expected to fall
+below the processing power of the system, and starving older jobs which are
+waiting for lock is unlikely and/or unimportant. 
 
 The term "lock-out tag-out" is originally an OSHA term for the procedures 
 used in the work environment to protect employees by preventing other users 
@@ -109,8 +111,8 @@ loto -w -L=cpu -- gzip archive2.tar &
 
 Cause a script to atomically append several lines to a file, relative
 to other instances of it or the file's consumer, assuming all other 
-actors also wait for loto locks on this file (non-loto'd scripts break 
-this guarantee since flock()s are voluntary):
+actors also use loto locks on this file (non-loto'd scripts break 
+this guarantee since flock()s are nothing but advisory):
 $ loto -w -L /path/to/dbfile.txt -- append_info_to_db.sh
 
 #### Contents of "append_info_to_db.sh" ####
@@ -123,5 +125,10 @@ for EACH in `cat elements_to_be_processed_together.txt`; do
 	echo $RESULTOFEACH >>/path/to/dbfile.txt
 done
 
+
+Special thanks to Steve Friedl for many of the initial implementation
+details used in this tool: http://www.unixwiz.net/tools/lockrun.html
+
 Send all comments, bugs, and fixes to: 
 	Kenneth Finnegan <KennethFinnegan2007@GMail.com>
+
